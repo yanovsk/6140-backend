@@ -11,6 +11,7 @@ export interface PostDoc extends BaseDoc {
   author: ObjectId;
   content: string;
   options?: PostOptions;
+  tags: string[]; // added as a part of enhancement of this concept
 }
 
 export default class PostConcept {
@@ -26,6 +27,14 @@ export default class PostConcept {
       sort: { dateUpdated: -1 },
     });
     return posts;
+  }
+
+  async getTagsByPostId(_id: ObjectId): Promise<string[]> {
+    const post = await this.posts.readOne({ _id });
+    if (!post) {
+      throw new NotFoundError(`Post ${_id} does not exist!`);
+    }
+    return post.tags;
   }
 
   async getByAuthor(author: ObjectId) {

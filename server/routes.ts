@@ -2,7 +2,7 @@ import { ObjectId } from "mongodb";
 
 import { Router, getExpressRouter } from "./framework/router";
 
-import { Friend, Post, User, WebSession } from "./app";
+import { Friend, Post, SmartCollection, User, WebSession } from "./app";
 import { PostDoc, PostOptions } from "./concepts/post";
 import { UserDoc } from "./concepts/user";
 import { WebSessionDoc } from "./concepts/websession";
@@ -23,6 +23,11 @@ class Routes {
   @Router.get("/users/:username")
   async getUser(username: string) {
     return await User.getUserByUsername(username);
+  }
+
+  @Router.get("/smartcollection")
+  async createSmartCollection() {
+    return await SmartCollection.createCollection("hi", "hi", [new ObjectId(1)]);
   }
 
   @Router.post("/users")
