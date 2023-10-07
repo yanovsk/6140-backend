@@ -1,14 +1,19 @@
 import { ObjectId } from "mongodb";
 
-import { Router, getExpressRouter } from "./framework/router";
+import { Router } from "./framework/router";
 
-import { Friend, Post, User, WebSession } from "./app";
-import { PostDoc, PostOptions } from "./concepts/post";
+import { Follow, Post, SmartCollection, SmartFeed, User, WebSession } from "./app";
+import { PostDoc } from "./concepts/post";
 import { UserDoc } from "./concepts/user";
 import { WebSessionDoc } from "./concepts/websession";
+import { getExpressRouter } from "./framework/router";
+import { assignSmartCollection, evaluatePostContent, getSmartTags } from "./gpt_helpers";
 import Responses from "./responses";
 
 class Routes {
+  /**
+   * User
+   */
   @Router.get("/session")
   async getSessionUser(session: WebSessionDoc) {
     const user = WebSession.getUser(session);
@@ -28,7 +33,15 @@ class Routes {
   @Router.post("/users")
   async createUser(session: WebSessionDoc, username: string, password: string) {
     WebSession.isLoggedOut(session);
-    return await User.create(username, password);
+    //also creating feed for this user
+    const user = await User.create(username, password);
+    if (user.user) {
+      //as soon as user is created we create an empty smart feed for it
+      await SmartFeed.createSmartFeed(user.user._id);
+      return user;
+    } else {
+      return "User creation failed";
+    }
   }
 
   @Router.patch("/users")
@@ -57,6 +70,10 @@ class Routes {
     return { msg: "Logged out!" };
   }
 
+  /**
+   * Post
+   */
+
   @Router.get("/posts")
   async getPosts(author?: string) {
     let posts;
@@ -68,19 +85,57 @@ class Routes {
     }
     return Responses.posts(posts);
   }
-
+  //standard controller for handling user creating new post
   @Router.post("/posts")
-  async createPost(session: WebSessionDoc, content: string, options?: PostOptions) {
+  async createPost(session: WebSessionDoc, content: string) {
     const user = WebSession.getUser(session);
-    const created = await Post.create(user, content, options);
-    return { msg: created.msg, post: await Responses.post(created.post) };
+    //getting tags using gpt-4
+    const isEducational = await evaluatePostContent(content);
+    //checking if the content of the post is educational
+
+    if (isEducational) {
+      //if so, proceeding with getting the tags
+      const tags = await getSmartTags(content);
+      const createdPost = await Post.create(user, content, tags);
+
+      //getting all the exists smart collections (their topics)
+      const smartCollections = await SmartCollection.getAllSmartCollections();
+      const smartCollectionsNames = smartCollections.map((collec) => collec.collectionTopic);
+
+      //getting GPT to assign the collectio to the user input
+      const response = await assignSmartCollection(smartCollectionsNames, content);
+      console.log("res", response);
+      if (createdPost.post) {
+        let topic = response.collectionTopic;
+        if (response.isNewTopic) {
+          //creating new smart collection
+          await SmartCollection.create(response.newTopicName, tags, response.newTopicName.replace(/\s+/g, "_").toLowerCase(), []);
+          topic = response.newTopicName;
+        }
+        const collectionId = await SmartCollection.getCollectionIdbyTopic(topic);
+        const smartCollections = await SmartCollection.addPostToCollection(collectionId._id, createdPost.post._id);
+        return { msg: createdPost.msg, post: await Responses.post(createdPost.post), tags: tags, smartCollections: smartCollections };
+      }
+    } else {
+      return { msg: "post is not educational. rewrite it" };
+    }
   }
 
   @Router.patch("/posts/:_id")
   async updatePost(session: WebSessionDoc, _id: ObjectId, update: Partial<PostDoc>) {
     const user = WebSession.getUser(session);
     await Post.isAuthor(user, _id);
-    return await Post.update(_id, update);
+    //checking if the text in the update is educational
+    if (update.content) {
+      const isEducational = await evaluatePostContent(update.content);
+      if (isEducational) {
+        const tags = await getSmartTags(update.content);
+        update.tags = tags;
+        return await Post.update(_id, update);
+      } else {
+        return { msg: "Updated post contains no educational content. Please edit the post and try again. " };
+      }
+    }
   }
 
   @Router.delete("/posts/:_id")
@@ -90,212 +145,218 @@ class Routes {
     return Post.delete(_id);
   }
 
-  @Router.get("/friends")
-  async getFriends(session: WebSessionDoc) {
-    const user = WebSession.getUser(session);
-    return await User.idsToUsernames(await Friend.getFriends(user));
+  /**
+   * Follow
+   */
+
+  @Router.post("/follow/:username")
+  async followUser(session: WebSessionDoc, username: string) {
+    const followerid = WebSession.getUser(session);
+    const followeeid = await User.getUserByUsername(username);
+    await User.userExists(followeeid._id);
+    return await Follow.follow(followerid, followeeid._id, "user");
   }
 
-  @Router.delete("/friends/:friend")
-  async removeFriend(session: WebSessionDoc, friend: string) {
-    const user = WebSession.getUser(session);
-    const friendId = (await User.getUserByUsername(friend))._id;
-    return await Friend.removeFriend(user, friendId);
+  @Router.delete("/unfollow/:username")
+  async unfollowUser(session: WebSessionDoc, username: string) {
+    const followerid = WebSession.getUser(session);
+    const followeeid = await User.getUserByUsername(username);
+    await User.userExists(followeeid._id);
+    return await Follow.unfollow(followerid, followeeid._id, "user");
   }
 
-  @Router.get("/friend/requests")
-  async getRequests(session: WebSessionDoc) {
-    const user = WebSession.getUser(session);
-    return await Responses.friendRequests(await Friend.getRequests(user));
+  @Router.get("/following/:username")
+  async getUserFollowingById(username: string) {
+    const user = await User.getUserByUsername(username);
+    await User.userExists(user._id);
+    return await Follow.getAllFollowing(user._id, "user");
   }
 
-  @Router.post("/friend/requests/:to")
-  async sendFriendRequest(session: WebSessionDoc, to: string) {
-    const user = WebSession.getUser(session);
-    const toId = (await User.getUserByUsername(to))._id;
-    return await Friend.sendRequest(user, toId);
+  @Router.get("/followers/:username")
+  async getUserFollowersById(username: string) {
+    const user = await User.getUserByUsername(username);
+    await User.userExists(user._id);
+    return await Follow.getAllFollowers(user._id, "user");
   }
 
-  @Router.delete("/friend/requests/:to")
-  async removeFriendRequest(session: WebSessionDoc, to: string) {
-    const user = WebSession.getUser(session);
-    const toId = (await User.getUserByUsername(to))._id;
-    return await Friend.removeRequest(user, toId);
-  }
+  /**
+   * Smart Collection
+   */
 
-  @Router.put("/friend/accept/:from")
-  async acceptFriendRequest(session: WebSessionDoc, from: string) {
-    const user = WebSession.getUser(session);
-    const fromId = (await User.getUserByUsername(from))._id;
-    return await Friend.acceptRequest(fromId, user);
-  }
-
-  @Router.put("/friend/reject/:from")
-  async rejectFriendRequest(session: WebSessionDoc, from: string) {
-    const user = WebSession.getUser(session);
-    const fromId = (await User.getUserByUsername(from))._id;
-    return await Friend.rejectRequest(fromId, user);
-  }
-
-  //initial outline of the design of your RESTful routes
-  //returns here are just for the linter
-
-  //create a smartcollection
-  @Router.post("/smartcollections")
-  async createSmartCollection(topic: string) {
-    return topic;
+  //create a collection
+  @Router.post("/smartcollection/create")
+  async createSmartCollection(topic: string, collectionname: string, tags: string[], posts: ObjectId[]) {
+    return await SmartCollection.create(topic, tags, collectionname, posts);
   }
 
   // Get a specific SmartCollection by ID.
-  @Router.get("/smartcollections/:_id")
-  async getSmartCollectionById(_id: ObjectId) {
-    // TODO
-    return _id;
+  @Router.get("/smartcollection/:collectionname")
+  async getSmartCollectionById(collectionname: string) {
+    return await SmartCollection.getByName(collectionname);
   }
 
-  //Add posts to a SmartCollection.
-  @Router.patch("/smartcollections/:_id/addposts")
-  async addPostsToSmartCollection(_id: ObjectId, posts: ObjectId[]) {
-    // TODO
-    return { _id, posts };
+  @Router.post("/smartcollection/follow/:collectionname")
+  async followSmartCollection(session: WebSessionDoc, collectionname: string) {
+    const followerId = WebSession.getUser(session);
+    await SmartCollection.collectionExistsByName(collectionname);
+    const smartCollection = await SmartCollection.getCollectionIdbyName(collectionname);
+    return await Follow.follow(followerId, smartCollection._id, "collection");
   }
 
-  //Remove a post from a SmartCollection (user can only remove their owen post).
-  @Router.patch("/smartcollections/:_id/removepost")
-  async removePostFromSmartCollection(_id: ObjectId, post: ObjectId) {
-    // TODO
-    return { _id, post };
+  @Router.delete("/smartcollection/unfollow/:collectionname")
+  async unfollowSmartCollection(session: WebSessionDoc, collectionname: string) {
+    const followerId = WebSession.getUser(session);
+    await SmartCollection.collectionExistsByName(collectionname);
+    const smartCollection = await SmartCollection.getCollectionIdbyName(collectionname);
+    return await Follow.unfollow(followerId, smartCollection._id, "collection");
   }
 
-  //Follow a SmartCollection.
-  @Router.post("/smartcollections/:_id/follow")
-  async followSmartCollection(session: WebSessionDoc, _id: ObjectId) {
-    // TODO
-    return { session, _id };
-  }
-
-  //Unfollow a SmartCollection.
-  @Router.post("/smartcollections/:_id/unfollow")
-  async unfollowSmartCollection(session: WebSessionDoc, _id: ObjectId) {
-    // TODO
-    return { session, _id };
+  // Get a specific SmartCollection by ID.
+  @Router.get("/smartcollection/posts/:collectionname")
+  async getSmartCollectionPosts(collectionname: string) {
+    return await SmartCollection.getPostsByName(collectionname);
   }
 
   /**
-   * Generate filters for the authenticated user's SmartFeed based on input.
+   * Smart Feed
    */
-  @Router.post("/smartfeed/generatefilters")
-  async generateFiltersAndApplyFiltersForUserSmartFeed(session: WebSessionDoc, input: string) {
-    // TODO
-    return { session, input };
+
+  @Router.get("/smartfeed/")
+  async getSmartFeed(session: WebSessionDoc) {
+    //simply return all the posts in the users feed
+    const userId = WebSession.getUser(session);
+    const followingsIds = await Follow.getAllFollowing(userId, "user");
+    //sending the posts to the Smart Feed to get ids of posts filtered according to the current filter
+    const { allPosts, postsIdandTags } = await Post.getAllPostsOfFollowings(followingsIds);
+    console.log("all", allPosts);
+    const filteredPostsIds = await SmartFeed.getPosts(userId, postsIdandTags);
+    const filteredFeed = allPosts.filter((post) => filteredPostsIds.includes(post._id));
+    return filteredFeed;
   }
 
-  /**
-   * Add posts to the 'allPosts' field of the authenticated user's SmartFeed.
-   */
-  @Router.patch("/smartfeed/addposts")
-  async addPostsToFeed(session: WebSessionDoc, newPosts: { [postId: string]: string[] }) {
-    // TODO
-    return { session, newPosts };
+  //update filters and return set of posts based on those filters
+  @Router.post("/smartfeed/update")
+  async updateSmartFeed(session: WebSessionDoc, userInput: string) {
+    const tags = await getSmartTags(userInput);
+    const userId = WebSession.getUser(session);
+    return await SmartFeed.updateSmartFilters(userId, tags);
   }
 
-  /**
-   * Reset the 'displayedPosts' field of the authenticated user's SmartFeed to include all posts in 'allPosts'.
-   */
-  @Router.post("/smartfeed/reset")
-  async resetUserSmartFeedDisplayedPosts(session: WebSessionDoc) {
-    // TODO
-    return { session };
-  }
+  // /**
+  //  * Generate filters for the authenticated user's SmartFeed based on input.
+  //  */
+  // @Router.post("/smartfeed/generatefilters")
+  // async generateFiltersAndApplyFiltersForUserSmartFeed(session: WebSessionDoc, input: string) {
+  //   // TODO
+  //   return { session, input };
+  // }
 
-  @Router.delete("/smartfeed/removepost/:postId")
-  async removePostFromUserSmartFeed(session: WebSessionDoc, postId: ObjectId) {
-    // TODO
-    return { session, postId };
-  }
+  // /**
+  //  * Add posts to the 'allPosts' field of the authenticated user's SmartFeed.
+  //  */
+  // @Router.patch("/smartfeed/addposts")
+  // async addPostsToFeed(session: WebSessionDoc, newPosts: { [postId: string]: string[] }) {
+  //   // TODO
+  //   return { session, newPosts };
+  // }
 
-  /**
-   * Set learning objectives for the authenticated user.
-   */
-  @Router.post("/aiassistant/setlearningobjectives")
-  async setLearningObjectives(session: WebSessionDoc, learningObjective: string) {
-    // TODO
-    return { session, learningObjective };
-  }
+  // /**
+  //  * Reset the 'displayedPosts' field of the authenticated user's SmartFeed to include all posts in 'allPosts'.
+  //  */
+  // @Router.post("/smartfeed/reset")
+  // async resetUserSmartFeedDisplayedPosts(session: WebSessionDoc) {
+  //   // TODO
+  //   return { session };
+  // }
 
-  /**
-   * Get weekly reset time for AiAssistant.
-   */
-  @Router.get("/aiassistant/weeklyresettime")
-  async getWeeklyResetTime() {
-    // TODO
-  }
+  // @Router.delete("/smartfeed/removepost/:postId")
+  // async removePostFromUserSmartFeed(session: WebSessionDoc, postId: ObjectId) {
+  //   // TODO
+  //   return { session, postId };
+  // }
 
-  /**
-   * Fetch AI-generated posts for the authenticated user.
-   */
-  @Router.get("/aiassistant/aigeneratedposts")
-  async getAiGeneratedPosts(session: WebSessionDoc) {
-    // TODO
-    return { session };
-  }
+  // /**
+  //  * Set learning objectives for the authenticated user.
+  //  */
+  // @Router.post("/aiassistant/setlearningobjectives")
+  // async setLearningObjectives(session: WebSessionDoc, learningObjective: string) {
+  //   // TODO
+  //   return { session, learningObjective };
+  // }
 
-  /**
-   * Fetch daily messages from AiAssistant for the authenticated user.
-   */
-  @Router.get("/aiassistant/dailymsgs")
-  async getDailyMessages(session: WebSessionDoc) {
-    // TODO
-    return { session };
-  }
+  // /**
+  //  * Get weekly reset time for AiAssistant.
+  //  */
+  // @Router.get("/aiassistant/weeklyresettime")
+  // async getWeeklyResetTime() {
+  //   // TODO
+  // }
 
-  @Router.post("/smartsearch/search")
-  async performSmartSearch(query: string, searchedProfile: ObjectId) {
-    // TODO
-    return { query, searchedProfile };
-  }
+  // /**
+  //  * Fetch AI-generated posts for the authenticated user.
+  //  */
+  // @Router.get("/aiassistant/aigeneratedposts")
+  // async getAiGeneratedPosts(session: WebSessionDoc) {
+  //   // TODO
+  //   return { session };
+  // }
 
-  /**
-   * Fetch the search results based on the query.
-   */
-  @Router.get("/smartsearch/results")
-  async getSearchResults(queryId: ObjectId) {
-    // TODO
-    return queryId;
-  }
+  // /**
+  //  * Fetch daily messages from AiAssistant for the authenticated user.
+  //  */
+  // @Router.get("/aiassistant/dailymsgs")
+  // async getDailyMessages(session: WebSessionDoc) {
+  //   // TODO
+  //   return { session };
+  // }
 
-  /**
-   * Fetch the available posts for the search space.
-   * I.e. all posts from the account being searched (or smart collection)
-   */
-  @Router.get("/smartsearch/searchspace")
-  async getSearchSpace(searchedProfile: ObjectId) {
-    // TODO
-    return { searchedProfile };
-  }
+  // @Router.post("/smartsearch/search")
+  // async performSmartSearch(query: string, searchedProfile: ObjectId) {
+  //   // TODO
+  //   return { query, searchedProfile };
+  // }
 
-  //Few additional methods for post and user
+  // /**
+  //  * Fetch the search results based on the query.
+  //  */
+  // @Router.get("/smartsearch/results")
+  // async getSearchResults(queryId: ObjectId) {
+  //   // TODO
+  //   return queryId;
+  // }
 
-  @Router.patch("/posts/:_id/schedule")
-  async schedulePost(session: WebSessionDoc, _id: ObjectId, date: string) {
-    // TODO
-    return { session, _id, date };
-  }
+  // /**
+  //  * Fetch the available posts for the search space.
+  //  * I.e. all posts from the account being searched (or smart collection)
+  //  */
+  // @Router.get("/smartsearch/searchspace")
+  // async getSearchSpace(searchedProfile: ObjectId) {
+  //   // TODO
+  //   return { searchedProfile };
+  // }
 
-  @Router.patch("/users/:username/learningobjective")
-  async updateLearningObjective(session: WebSessionDoc, learningObjective: string) {
-    // TODO
-    return { session, learningObjective };
-  }
+  // //Few additional methods for post and user
 
-  /**
-   * Get the search history of a specific user.
-   */
-  @Router.get("/users/:username/searchhistory")
-  async getSearchHistory(session: WebSessionDoc) {
-    // TODO
-    return session;
-  }
+  // @Router.patch("/posts/:_id/schedule")
+  // async schedulePost(session: WebSessionDoc, _id: ObjectId, date: string) {
+  //   // TODO
+  //   return { session, _id, date };
+  // }
+
+  // @Router.patch("/users/:username/learningobjective")
+  // async updateLearningObjective(session: WebSessionDoc, learningObjective: string) {
+  //   // TODO
+  //   return { session, learningObjective };
+  // }
+
+  // /**
+  //  * Get the search history of a specific user.
+  //  */
+  // @Router.get("/users/:username/searchhistory")
+  // async getSearchHistory(session: WebSessionDoc) {
+  //   // TODO
+  //   return session;
+  // }
 }
 
 export default getExpressRouter(new Routes());

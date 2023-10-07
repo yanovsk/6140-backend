@@ -53,6 +53,32 @@ const operations: operation[] = [
     method: "GET",
     fields: { username: "input" },
   },
+
+  {
+    name: "Follow User ",
+    endpoint: "/api/follow/:username",
+    method: "POST",
+    fields: { username: "input" },
+  },
+
+  {
+    name: "Unfollow User",
+    endpoint: "/api/unfollow/:username",
+    method: "DELETE",
+    fields: { username: "input" },
+  },
+  {
+    name: "Get User Following (people who user follows)",
+    endpoint: "/api/following/:username",
+    method: "GET",
+    fields: { username: "input" },
+  },
+  {
+    name: "Get User Followers",
+    endpoint: "/api/followers/:username",
+    method: "GET",
+    fields: { username: "input" },
+  },
   {
     name: "Get Posts (empty for all)",
     endpoint: "/api/posts",
@@ -63,19 +89,67 @@ const operations: operation[] = [
     name: "Create Post",
     endpoint: "/api/posts",
     method: "POST",
-    fields: { content: "input" },
+    fields: { content: "textarea" },
   },
   {
     name: "Update Post",
     endpoint: "/api/posts/:id",
     method: "PATCH",
-    fields: { id: "input", update: { content: "input", options: { backgroundColor: "input" } } },
+    fields: { id: "input", update: { content: "input" } },
   },
   {
     name: "Delete Post",
     endpoint: "/api/posts/:id",
     method: "DELETE",
     fields: { id: "input" },
+  },
+  // async createSmartCollection(topic: string, collectionId: string, tags: string[], posts: ObjectId[]) {
+
+  {
+    name: "Create SmartCollection",
+    endpoint: "/api/smartcollection/create",
+    method: "POST",
+    fields: { topic: "input", collectionname: "input", tags: "input", posts: "input" },
+  },
+
+  {
+    name: "Get SmartCollection",
+    endpoint: "/api/smartcollection/:collectionname",
+    method: "GET",
+    fields: { collectionname: "input" },
+  },
+  {
+    name: "Follow SmartCollection",
+    endpoint: "/api/smartcollection/follow/:collectionname",
+    method: "POST",
+    fields: { collectionname: "input" },
+  },
+  {
+    name: "Unfollow SmartCollection",
+    endpoint: "/api/smartcollection/unfollow/:collectionname",
+    method: "DELETE",
+    fields: { collectionname: "input" },
+  },
+
+  {
+    name: "Get SmartCollection posts",
+    endpoint: "/api/smartcollection/posts/:collectionname",
+    method: "GET",
+    fields: { collectionname: "input" },
+  },
+
+  {
+    name: "Get Smart Feed",
+    endpoint: "/api/smartfeed",
+    method: "GET",
+    fields: {},
+  },
+
+  {
+    name: "Update SmartFeed",
+    endpoint: "/api/smartfeed/update",
+    method: "POST",
+    fields: { userInput: "input" },
   },
 ];
 
