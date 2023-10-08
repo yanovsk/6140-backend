@@ -10,6 +10,11 @@ import { getExpressRouter } from "./framework/router";
 import { assignSmartCollection, evaluatePostContent, getDailyContent, getFeedFilters, getSmartTags } from "./gpt_helpers";
 import Responses from "./responses";
 
+interface dailyContent {
+  learningPosts: string;
+  dailyMessage: string;
+}
+
 class Routes {
   /**
    * User
@@ -271,7 +276,7 @@ class Routes {
     const currentDate = new Date();
 
     // Assign a date to each content item
-    const dailyContentWithDates = dailyContent.map((content) => {
+    const dailyContentWithDates = dailyContent.map((content: dailyContent) => {
       const contentWithDate = {
         ...content,
         date: new Date(currentDate),
