@@ -152,7 +152,131 @@ export async function assignSmartCollection(collectionsList: string[], user_inpu
 
     if (responseMessage.function_call) {
       const functionArgs = JSON.parse(responseMessage.function_call.arguments);
-      return functionArgs;
+      let topic;
+      const isNewTopic = functionArgs.isNewTopic;
+      if (isNewTopic) {
+        topic = functionArgs.newTopicName;
+      } else {
+        topic = functionArgs.collectionTopic;
+      }
+
+      return { topic, isNewTopic };
+    }
+  } catch (error) {
+    console.error("Error:", error);
+    throw error;
+  }
+}
+
+export async function getFeedFilters(userQuery: string, allTags: string[]) {
+  console.log(userQuery);
+
+  const functions = [
+    {
+      name: "extractForbiddenTags",
+      description: `Identify and return tags that the user wants to avoid in their feed based on their input.`,
+      parameters: {
+        type: "object",
+        properties: {
+          forbiddenTags: {
+            type: "array",
+            items: {
+              name: "forbiddenTag",
+              type: "string",
+              description: "A tag that should be excluded based on user preference.",
+              enum: allTags,
+            },
+            description: `An array of tags to be excluded from the user's feed.`,
+          },
+        },
+        required: ["forbiddenTags"],
+      },
+    },
+  ];
+
+  try {
+    const response = await openai.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `You are a tag-analyzing bot. Analyze a user's request about their preferred social media feed, identify the tags they want to avoid, 
+          and call the 'extractForbiddenTags' function with an array of those unwanted tags. The available tags are: ${allTags}. 
+          Example: If the user says: "Only show me posts about science" and the available tags are ['politics', 'economy', 'science'], 
+          you should identify and return ['politics', 'economy'] as the forbidden tags.`,
+        },
+        { role: "user", content: `User query to select forbidden tags from: ${userQuery}` },
+      ],
+      model: "gpt-4",
+      functions: functions,
+      function_call: { name: "extractForbiddenTags" },
+    });
+
+    const responseMessage = response.choices[0].message;
+    console.log(responseMessage);
+
+    if (responseMessage.function_call) {
+      const functionArgs = JSON.parse(responseMessage.function_call.arguments);
+      return functionArgs.forbiddenTags;
+    }
+  } catch (error) {
+    console.error("Error:", error);
+    throw error;
+  }
+}
+
+export async function getDailyContent(goal: string) {
+  const functions = [
+    {
+      name: "generateLearningContent",
+      description: `Generate a list of 7 posts with content (200-300 words each) and daily messages based on the user's learning goal.`,
+      parameters: {
+        type: "object",
+        properties: {
+          learningPosts: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                postContent: {
+                  type: "string",
+                  description: "Content of the learning post.",
+                },
+                dailyMessage: {
+                  type: "string",
+                  description: "A message describing the learning journey status.",
+                },
+              },
+              required: ["postContent", "dailyMessage"],
+            },
+            description: "An array of objects, each containing a post and a daily message.",
+          },
+        },
+        required: ["learningPosts"],
+      },
+    },
+  ];
+
+  try {
+    const response = await openai.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `You are a learning content generator bot. Your task is to create a series of 7 learning posts and daily messages 
+          based on a user's weekly learning goal. The posts should be 200-300 words long and should gradually guide the user through the learning topic.
+          The daily messages should inform the user of their current progress, anticipate future learnings, and review past contents if applicable.`,
+        },
+        { role: "user", content: goal },
+      ],
+      model: "gpt-4",
+      functions: functions,
+      function_call: { name: "generateLearningContent" },
+    });
+
+    const responseMessage = response.choices[0].message;
+
+    if (responseMessage.function_call) {
+      const functionArgs = JSON.parse(responseMessage.function_call.arguments);
+      return functionArgs.learningPosts;
     }
   } catch (error) {
     console.error("Error:", error);

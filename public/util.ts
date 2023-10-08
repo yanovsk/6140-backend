@@ -137,6 +137,12 @@ const operations: operation[] = [
     method: "GET",
     fields: { collectionname: "input" },
   },
+  {
+    name: "Get All Smart Collections",
+    endpoint: "/api/smartcollections/all",
+    method: "GET",
+    fields: {},
+  },
 
   {
     name: "Get Smart Feed",
@@ -149,7 +155,19 @@ const operations: operation[] = [
     name: "Update SmartFeed",
     endpoint: "/api/smartfeed/update",
     method: "POST",
-    fields: { userInput: "input" },
+    fields: { userQuery: "input" },
+  },
+  {
+    name: "Set Weekly Learning goal",
+    endpoint: "/api/aiassistant/setgoal",
+    method: "POST",
+    fields: { goal: "input" },
+  },
+  {
+    name: "Get AI Assistant",
+    endpoint: "/api/aiassistant",
+    method: "GET",
+    fields: {},
   },
 ];
 

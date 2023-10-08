@@ -4,7 +4,6 @@ import DocCollection, { BaseDoc } from "../framework/doc";
 export interface SmartFeedDoc extends BaseDoc {
   userId: ObjectId;
   displayedPosts: ObjectId[];
-  allPosts: { [postId: string]: string[] }; // Map of post ID to tags
   feedFilters: string[];
 }
 
@@ -24,9 +23,14 @@ export default class SmartFeedConcept {
   async getPosts(userId: ObjectId, allPosts: { postId: ObjectId; tags: string[] }[]) {
     const feed = await this.smartFeed.readOne({ userId });
     const feedFilters = feed?.feedFilters;
-    const filteredPosts = allPosts.filter((post) => post.tags.some((tag) => feedFilters?.includes(tag)));
-    const filteredPostsIds = filteredPosts.map((post) => post.postId);
-    return filteredPostsIds;
+
+    if (feedFilters) {
+      //if posts includes at least one tag from the filter array then this post is not included in the feed
+      const filteredPosts = allPosts.filter((post) => !post.tags.some((tag) => feedFilters.includes(tag)));
+      return filteredPosts.map((post) => post.postId);
+    } else {
+      return allPosts.map((post) => post.postId);
+    }
   }
   // async addToAllPosts(userId: ObjectId, newPosts: { [postId: string]: string[] }) {
   //   const feed = await this.smartFeeds.readOne({ userId });

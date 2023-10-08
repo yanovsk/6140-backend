@@ -12,7 +12,7 @@ import MongoStore from "connect-mongo";
 import { connectDb } from "../server/db";
 import router from "../server/routes";
 
-export const app = express();
+const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(logger("dev"));
 
@@ -48,3 +48,5 @@ void connectDb().then(() => {
     console.log("Started listening on port", PORT);
   });
 });
+
+export default app;
