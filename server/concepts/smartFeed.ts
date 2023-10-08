@@ -1,8 +1,9 @@
 import { ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
+import { BadValuesError, NotFoundError } from "./errors";
 
 export interface SmartFeedDoc extends BaseDoc {
-  userId: ObjectId;
+  owner: ObjectId;
   displayedPosts: ObjectId[];
   feedFilters: string[];
 }
@@ -10,26 +11,44 @@ export interface SmartFeedDoc extends BaseDoc {
 export default class SmartFeedConcept {
   public readonly smartFeed = new DocCollection<SmartFeedDoc>("smartFeed");
 
-  async updateSmartFilters(userId: ObjectId, filters: string[]) {
-    const smartFeed = await this.smartFeed.updateOne({ userId }, { feedFilters: filters });
-    return { msg: "Filters generated!", smartFeed: smartFeed };
+  async updateSmartFilters(owner: ObjectId, filters: string[]) {
+    try {
+      const smartFeed = await this.smartFeed.updateOne({ owner }, { feedFilters: filters });
+      if (!smartFeed) {
+        throw new NotFoundError(`SmartFeed for owner ${owner} not found.`);
+      }
+      return { msg: "Filters generated!", smartFeed: smartFeed };
+    } catch (error) {
+      throw new BadValuesError(`Error updating smart filters for owner ${owner}`);
+    }
   }
 
-  async createSmartFeed(userId: ObjectId) {
-    const smartFeed = await this.smartFeed.createOne({ userId });
-    return { msg: "Smart feed created!", smartFeed: smartFeed };
+  async createSmartFeed(owner: ObjectId) {
+    try {
+      const smartFeed = await this.smartFeed.createOne({ owner });
+      return { msg: "Smart feed created!", smartFeed: smartFeed };
+    } catch (error) {
+      throw new BadValuesError(`Error creating smart feed for owner ${owner}`);
+    }
   }
 
-  async getPosts(userId: ObjectId, allPosts: { postId: ObjectId; tags: string[] }[]) {
-    const feed = await this.smartFeed.readOne({ userId });
-    const feedFilters = feed?.feedFilters;
+  async getPosts(owner: ObjectId, allPosts: { postId: ObjectId; tags: string[] }[]) {
+    try {
+      const feed = await this.smartFeed.readOne({ owner });
+      const feedFilters = feed?.feedFilters;
 
-    if (feedFilters) {
-      //if posts includes at least one tag from the filter array then this post is not included in the feed
-      const filteredPosts = allPosts.filter((post) => !post.tags.some((tag) => feedFilters.includes(tag)));
-      return filteredPosts.map((post) => post.postId);
-    } else {
-      return allPosts.map((post) => post.postId);
+      if (!feed) {
+        throw new NotFoundError(`SmartFeed for owner ${owner} not found.`);
+      }
+
+      if (feedFilters) {
+        const filteredPosts = allPosts.filter((post) => !post.tags.some((tag) => feedFilters.includes(tag)));
+        return filteredPosts.map((post) => post.postId);
+      } else {
+        return allPosts.map((post) => post.postId);
+      }
+    } catch (error) {
+      throw new NotFoundError(`Error retrieving posts for owner ${owner}`);
     }
   }
 }

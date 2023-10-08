@@ -1,7 +1,7 @@
 import { Filter, ObjectId } from "mongodb";
 
 import DocCollection, { BaseDoc } from "../framework/doc";
-import { NotAllowedError, NotFoundError } from "./errors";
+import { BadValuesError, NotAllowedError, NotFoundError } from "./errors";
 
 export interface PostDoc extends BaseDoc {
   author: ObjectId;
@@ -14,9 +14,17 @@ export default class PostConcept {
   public readonly posts = new DocCollection<PostDoc>("posts");
 
   async create(author: ObjectId, content: string, tags: string[]) {
-    const timestamp = new Date();
-    const _id = await this.posts.createOne({ author, content, tags, timestamp });
-    return { msg: "Post successfully created!", post: await this.posts.readOne({ _id }) };
+    try {
+      const timestamp = new Date();
+      const _id = await this.posts.createOne({ author, content, tags, timestamp });
+      const post = await this.posts.readOne({ _id });
+      if (!post) {
+        throw new NotFoundError(`Post with ID ${_id} was not found after creation.`);
+      }
+      return { msg: "Post successfully created!", post };
+    } catch (error) {
+      throw new BadValuesError("Error creating post");
+    }
   }
 
   async getPosts(query: Filter<PostDoc>) {
@@ -27,7 +35,11 @@ export default class PostConcept {
   }
 
   async getPostById(_id: ObjectId) {
-    return await this.posts.readOne({ _id });
+    const post = await this.posts.readOne({ _id });
+    if (!post) {
+      throw new NotFoundError(`Post with ID ${_id} not found.`);
+    }
+    return post;
   }
 
   async getSmartTagsByPostId(_id: ObjectId) {
@@ -57,26 +69,39 @@ export default class PostConcept {
   async getAllPostsOfFollowings(followingsIds: ObjectId[]) {
     const allPosts = [];
     const postsIdandTags = [];
-    //iterating thru all the followiwngs of the user
-    for (const id of followingsIds) {
-      //for each following, getting posts for past 7days
-      const posts = await this.getRecentPostsByAuthor(id);
+
+    // Get all posts in parallel
+    const allRecentPosts = await Promise.all(followingsIds.map((id) => this.getRecentPostsByAuthor(id)));
+
+    // Flatten the results and extract post ids and tags
+    for (const posts of allRecentPosts) {
       allPosts.push(...posts);
-      const postIdandTags = posts.map((post) => ({ postId: post._id, tags: post.tags }));
-      postsIdandTags.push(...postIdandTags);
+      postsIdandTags.push(...posts.map((post) => ({ postId: post._id, tags: post.tags })));
     }
+
     return { allPosts, postsIdandTags };
   }
 
   async update(_id: ObjectId, update: Partial<PostDoc>) {
     this.sanitizeUpdate(update);
     await this.posts.updateOne({ _id }, update);
-    return { msg: "Post successfully updated!", post: await this.posts.readOne({ _id }) };
+    const updatedPost = await this.posts.readOne({ _id });
+    if (!updatedPost) {
+      throw new NotFoundError(`Post with ID ${_id} not found after update.`);
+    }
+    return { msg: "Post successfully updated!", post: updatedPost };
   }
 
   async delete(_id: ObjectId) {
-    await this.posts.deleteOne({ _id });
-    return { msg: "Post deleted successfully!" };
+    try {
+      const result = await this.posts.deleteOne({ _id });
+      if (result.deletedCount === 0) {
+        throw new NotFoundError(`Post with ID ${_id} could not be deleted because it was not found.`);
+      }
+      return { msg: "Post deleted successfully!" };
+    } catch (error) {
+      throw new NotFoundError("Error deleting post");
+    }
   }
 
   async isAuthor(user: ObjectId, _id: ObjectId) {

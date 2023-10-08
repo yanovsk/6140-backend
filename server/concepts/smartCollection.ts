@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
-import { NotFoundError } from "./errors";
+import { BadValuesError, NotFoundError } from "./errors";
 
 export interface SmartCollectionDoc extends BaseDoc {
   collectionTopic: string;
@@ -15,13 +15,21 @@ export default class SmartCollectionConcept {
   public readonly smartCollections = new DocCollection<SmartCollectionDoc>("smartCollections");
 
   async create(collectionTopic: string, collectionTags: string[], collectionName: string, containedPosts: ObjectId[]) {
-    const _id = await this.smartCollections.createOne({
-      collectionTopic: collectionTopic,
-      collectionTags: collectionTags,
-      containedPosts: containedPosts,
-      collectionName: collectionName,
-    });
-    return { msg: "SmartCollection successfully created!", smartCollection: await this.smartCollections.readOne({ _id }) };
+    try {
+      const _id = await this.smartCollections.createOne({
+        collectionTopic: collectionTopic,
+        collectionTags: collectionTags,
+        containedPosts: containedPosts,
+        collectionName: collectionName,
+      });
+      const smartCollection = await this.smartCollections.readOne({ _id });
+      if (!smartCollection) {
+        throw new NotFoundError("SmartCollection could not be retrieved after creation.");
+      }
+      return { msg: "SmartCollection successfully created!", smartCollection: smartCollection };
+    } catch (error) {
+      throw new BadValuesError(`Error creating SmartCollection`);
+    }
   }
 
   async getById(_id: ObjectId) {
@@ -47,17 +55,15 @@ export default class SmartCollectionConcept {
     return { msg: "collection retrieved", _id: SmartCollection._id };
   }
   async addPostToCollection(collectionId: ObjectId, postId: ObjectId) {
-    const containedPosts = (await this.getPostsById(collectionId)).posts;
-    console.log("here", containedPosts);
-    //containedPosts might be null if no prior posts
-    const validatedPosts = containedPosts ?? [];
-
-    // Add the new postId to the array.
-    const updatedPosts = [...validatedPosts, postId];
-
-    await this.smartCollections.updateOne({ _id: collectionId }, { containedPosts: updatedPosts });
-
-    return { msg: "collection retrieved", posts: await this.getPostsById(collectionId) };
+    try {
+      const { posts } = await this.getPostsById(collectionId);
+      const validatedPosts = posts ?? [];
+      const updatedPosts = [...validatedPosts, postId];
+      await this.smartCollections.updateOne({ _id: collectionId }, { containedPosts: updatedPosts });
+      return { msg: "Collection retrieved", posts: await this.getPostsById(collectionId) };
+    } catch (error) {
+      throw new BadValuesError(`Error adding post to collection: `);
+    }
   }
 
   async getCollectionIdbyName(name: string) {
@@ -113,16 +119,4 @@ export default class SmartCollectionConcept {
 
     return SmartCollections;
   }
-
-  // async addPostsToCollection(sc: SmartCollectionDoc, posts: ObjectId[]) {
-  //   const updatedPosts = [...sc.containedPosts, ...posts];
-  //   await this.smartCollections.updateOne({ _id: sc._id }, { containedPosts: updatedPosts });
-  //   return { msg: "Posts added to SmartCollection!" };
-  // }
-
-  // async removePostFromCollection(sc: SmartCollectionDoc, post: ObjectId) {
-  //   const updatedPosts = sc.containedPosts.filter((p) => !p.equals(post));
-  //   await this.smartCollections.updateOne({ _id: sc._id }, { containedPosts: updatedPosts });
-  //   return { msg: "Post removed from SmartCollection!" };
-  // }
 }

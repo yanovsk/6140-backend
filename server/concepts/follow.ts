@@ -26,24 +26,39 @@ export default class FollowConcept {
   }
 
   async getAllFollowing(follower: ObjectId, type: "user" | "collection") {
-    const followings = await this.following.readMany({ follower, type });
-    console.log("followings", follower);
-    return followings.map((f) => f.followee);
+    try {
+      const followings = await this.following.readMany({ follower, type });
+      console.log("followings", follower);
+      return followings.map((f) => f.followee);
+    } catch (error) {
+      throw new NotFoundError(`Error retrieving followings for user ${follower}`);
+    }
   }
 
   async getAllFollowers(followee: ObjectId, type: "user" | "collection") {
-    const followers = await this.following.readMany({ followee, type });
-    return followers.map((f) => f.follower);
+    try {
+      const followers = await this.following.readMany({ followee, type });
+      return followers.map((f) => f.follower);
+    } catch (error) {
+      throw new NotFoundError(`Error retrieving followers for user ${followee}`);
+    }
   }
 
   private async isNotFollowing(follower: ObjectId, followee: ObjectId, type: "user" | "collection") {
-    if (follower == followee) {
-      throw new SelfFollowError();
-    }
+    try {
+      if (follower.equals(followee)) {
+        throw new SelfFollowError();
+      }
 
-    const follow = await this.following.readOne({ follower, followee, type });
-    if (follow !== null) {
-      throw new AlreadyFollowingError(follower, followee);
+      const follow = await this.following.readOne({ follower, followee, type });
+      if (follow !== null) {
+        throw new AlreadyFollowingError(follower, followee);
+      }
+    } catch (error) {
+      if (error instanceof AlreadyFollowingError || error instanceof SelfFollowError) {
+        throw error; // rethrow to keep the original message
+      }
+      throw new NotAllowedError("Error checking following status");
     }
   }
 }

@@ -311,14 +311,9 @@ class Routes {
 
     //turning user query to a set of search tags using GPT-4
     const tagsToFind = await getSearchTags(allTags, userQuery);
-    console.log("here", tagsToFind);
 
     //calling search action
     const resultsPostIds = await SmartSearch.search(userId, searchedUser._id, userQuery, postsIdandTags, tagsToFind);
-    console.log("in routes", resultsPostIds);
-
-    const test = await Post.getPostById(resultsPostIds[0]);
-    console.log("test", test);
 
     const results = await Promise.all(
       resultsPostIds.map(async (id) => {

@@ -1,5 +1,6 @@
 import { ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
+import { BadValuesError, NotAllowedError, NotFoundError } from "./errors";
 
 interface DailyPostAndMsg {
   Date: Date;
@@ -8,7 +9,7 @@ interface DailyPostAndMsg {
 }
 
 export interface AIAssistantDoc extends BaseDoc {
-  userId: ObjectId;
+  owner: ObjectId;
   weeklyLearningGoal: string;
   learningCycleExpDate: Date;
   dailyPostsAndMsgs: DailyPostAndMsg[];
@@ -17,31 +18,42 @@ export interface AIAssistantDoc extends BaseDoc {
 export default class AIAssistantConcept {
   public readonly AIAssistant = new DocCollection<AIAssistantDoc>("AIAssistant");
 
-  //this function is called when user profile is created
-  async createAIAssistant(userId: ObjectId) {
-    const AIAssistant = await this.AIAssistant.createOne({ userId });
-    return { msg: "AI Assistant created!", AIAssistant: AIAssistant };
+  async createAIAssistant(owner: ObjectId) {
+    try {
+      const AIAssistant = await this.AIAssistant.createOne({ owner });
+      return { msg: "AI Assistant created!", AIAssistant: AIAssistant };
+    } catch (error) {
+      throw new BadValuesError(`Error creating AI Assistant for owner ${owner}`);
+    }
   }
 
-  async getAIAssistantByUserID(userId: ObjectId) {
-    const AIAssistant = await this.AIAssistant.readOne({ userId });
+  async getAIAssistantByUserID(owner: ObjectId) {
+    const AIAssistant = await this.AIAssistant.readOne({ owner });
+    if (!AIAssistant) {
+      throw new NotFoundError(`AI Assistant not found for user ${owner}`);
+    }
     return AIAssistant;
   }
 
   async setWeeklyLearningCycle(userID: ObjectId, goal: string, expDate: Date, dailyContent: DailyPostAndMsg[]) {
-    const AIAssistant = await this.getAIAssistantByUserID(userID);
+    try {
+      const AIAssistant = await this.getAIAssistantByUserID(userID);
 
-    if (AIAssistant) {
-      const _id = AIAssistant._id;
+      if (!AIAssistant) {
+        throw new NotFoundError(`No AI Assistant found for user ${userID}`);
+      }
+
       const update = {
         weeklyLearningGoal: goal,
         learningCycleExpDate: expDate,
         dailyPostsAndMsgs: dailyContent,
       };
-      await this.AIAssistant.updateOne({ _id }, update);
-    }
-    const AIAssistantCycle = await this.getAIAssistantByUserID(userID);
+      await this.AIAssistant.updateOne({ _id: AIAssistant._id }, update);
+      const AIAssistantCycle = await this.getAIAssistantByUserID(userID);
 
-    return { msg: "weekly learning objectives are set!", cycle: AIAssistantCycle };
+      return { msg: "Weekly learning objectives are set!", cycle: AIAssistantCycle };
+    } catch (error) {
+      throw new NotAllowedError(`Error setting weekly learning cycle for user ${userID}`);
+    }
   }
 }
