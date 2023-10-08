@@ -169,6 +169,19 @@ const operations: operation[] = [
     method: "GET",
     fields: {},
   },
+
+  {
+    name: "Search user post (natural language)",
+    endpoint: "/api/search/:username",
+    method: "POST",
+    fields: { username: "input", userQuery: "input" },
+  },
+  {
+    name: "Get search history",
+    endpoint: "/api/search/history",
+    method: "GET",
+    fields: {},
+  },
 ];
 
 // Do not edit below here.

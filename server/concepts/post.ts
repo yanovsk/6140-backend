@@ -26,6 +26,10 @@ export default class PostConcept {
     return posts;
   }
 
+  async getPostById(_id: ObjectId) {
+    return await this.posts.readOne({ _id });
+  }
+
   async getSmartTagsByPostId(_id: ObjectId) {
     const post = await this.posts.readOne({ _id });
     if (!post) {

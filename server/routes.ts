@@ -2,12 +2,12 @@ import { ObjectId } from "mongodb";
 
 import { Router } from "./framework/router";
 
-import { AIAssistant, Follow, Post, SmartCollection, SmartFeed, User, WebSession } from "./app";
+import { AIAssistant, Follow, Post, SmartCollection, SmartFeed, SmartSearch, User, WebSession } from "./app";
 import { PostDoc } from "./concepts/post";
 import { UserDoc } from "./concepts/user";
 import { WebSessionDoc } from "./concepts/websession";
 import { getExpressRouter } from "./framework/router";
-import { assignSmartCollection, evaluatePostContent, getDailyContent, getFeedFilters, getSmartTags } from "./gpt_helpers";
+import { assignSmartCollection, evaluatePostContent, getDailyContent, getFeedFilters, getSearchTags, getSmartTags } from "./gptHelpers";
 import Responses from "./responses";
 
 interface dailyContent {
@@ -296,6 +296,44 @@ class Routes {
   /**
    * Smart Search
    */
+
+  @Router.post("/search/:username")
+  async searchUserPosts(session: WebSessionDoc, username: string, userQuery: string) {
+    const userId = WebSession.getUser(session);
+    const searchedUser = await User.getUserByUsername(username);
+
+    //getting all the post ids and their tags of a user being searched
+    const searchedUserPosts = await Post.getByAuthor(searchedUser._id);
+    const postsIdandTags = searchedUserPosts.map((post) => ({ postId: post._id, tags: post.tags }));
+
+    //getting a set of all tags user's posts have
+    const allTags = [...new Set(postsIdandTags.flatMap((post) => post.tags))];
+
+    //turning user query to a set of search tags using GPT-4
+    const tagsToFind = await getSearchTags(allTags, userQuery);
+    console.log("here", tagsToFind);
+
+    //calling search action
+    const resultsPostIds = await SmartSearch.search(userId, searchedUser._id, userQuery, postsIdandTags, tagsToFind);
+    console.log("in routes", resultsPostIds);
+
+    const test = await Post.getPostById(resultsPostIds[0]);
+    console.log("test", test);
+
+    const results = await Promise.all(
+      resultsPostIds.map(async (id) => {
+        return await Post.getPostById(id);
+      }),
+    );
+
+    return results;
+  }
+
+  @Router.get("/search/history")
+  async getSearchHistory(session: WebSessionDoc) {
+    const userId = WebSession.getUser(session);
+    return await SmartSearch.getSearchHistoryByUserId(userId);
+  }
 }
 
 export default getExpressRouter(new Routes());

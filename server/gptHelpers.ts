@@ -283,3 +283,58 @@ export async function getDailyContent(goal: string) {
     throw error;
   }
 }
+
+export async function getSearchTags(allTags: string[], query: string) {
+  console.log("TAGS", allTags);
+  const functions = [
+    {
+      name: "selectRelevantTags",
+      description: `Select up to 5 most relevant tags based on the user query.`,
+      parameters: {
+        type: "object",
+        properties: {
+          searchTags: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: allTags,
+            },
+            description: "Tags from user's previous posts.",
+          },
+        },
+        required: ["searchTags"],
+      },
+    },
+  ];
+
+  try {
+    const response = await openai.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `You are a tag selection assistant. Your task is to select up to 5 most relevant tags from a given list of tags based on a user's search query.`,
+        },
+        {
+          role: "user",
+          content: `Here is the search query ${query}. Select most relevant tags that correspond to this query from this collection of tags
+           and fill out 'searchTags' parameter  of 'selectRelevantTags' function with them. Tags to choose from ${allTags}`,
+        },
+      ],
+      model: "gpt-4",
+      functions: functions,
+      function_call: {
+        name: "selectRelevantTags",
+      },
+    });
+
+    const responseMessage = response.choices[0].message;
+    if (responseMessage.function_call) {
+      const functionArgs = JSON.parse(responseMessage.function_call.arguments);
+      console.log(responseMessage);
+      return functionArgs.searchTags;
+    }
+  } catch (error) {
+    console.error("Error:", error);
+    throw error;
+  }
+}
